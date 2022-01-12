@@ -11,10 +11,11 @@
      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
  
 	<cc:assembly id="WorkdayAssembly" version="2021.51">
-        <cc:workday-in id="StartHere">
+        <cc:workday-in id="StartHere" routes-to="CallSubRoutine">
             <cc:integration-system name="hello_World_v2"/>
         </cc:workday-in>
         <cc:local-in id="SubRoutine"/>
+        <cc:local-out id="CallSubRoutine" store-message="none" endpoint="vm://hello_World_v2/SubRoutine"/>
 	</cc:assembly>
 
 </beans>
