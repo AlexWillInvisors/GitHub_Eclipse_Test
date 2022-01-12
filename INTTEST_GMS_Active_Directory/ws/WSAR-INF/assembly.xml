@@ -1,0 +1,294 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans
+     xmlns="http://www.springframework.org/schema/beans"
+     xmlns:beans="http://www.springframework.org/schema/beans"
+     xmlns:atom="http://www.w3.org/2005/Atom"
+     xmlns:cc="http://www.capeclear.com/assembly/10"
+     xmlns:cloud="urn:com.workday/esb/cloud/10.0"
+     xmlns:env="http://schemas.xmlsoap.org/soap/envelope/"
+     xmlns:pi="urn:com.workday/picof"
+     xmlns:wd="urn:com.workday/bsvc"
+     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ 
+	<cc:assembly id="WorkdayAssembly" version="2017.35">
+        <cc:workday-in id="StartHere" routes-to="AsyncMediation">
+            <cc:integration-system name="INT001_GMS_ActiveDirectory">
+        <cloud:param name="DataSource">
+          <cloud:type>
+            <cloud:enumeration-type name="DataSource">
+              <cloud:enumeration>CustomReport</cloud:enumeration>
+              <cloud:enumeration>WebService</cloud:enumeration>
+              <cloud:enumeration>ERROR</cloud:enumeration>
+            </cloud:enumeration-type>
+          </cloud:type>
+          <cloud:default>
+            <cloud:enumeration name="DataSource">
+              <cloud:enumeration>CustomReport</cloud:enumeration>
+            </cloud:enumeration>
+          </cloud:default>
+        </cloud:param>
+        <cloud:param name="Company">
+          <cloud:type>
+            <cloud:class-report-field description="Company" type="WID" singular="true">b431c1eeabab10000c85968665bb00a3</cloud:class-report-field>
+          </cloud:type>
+        </cloud:param>
+        <cloud:attribute-map-service name="INTAD_Attribute_Map_Service">
+          <cloud:attribute name="Document Retention">
+            <cloud:type>
+              <cloud:simple-type>number</cloud:simple-type>
+            </cloud:type>
+          </cloud:attribute>
+          <cloud:map name="Gender">
+            <cloud:internal-type>
+              <cloud:class-report-field description="Gender Identity - Current" type="WID">d26b19b3d3751000081d2f6a10ba0066</cloud:class-report-field>
+            </cloud:internal-type>
+            <cloud:external-type>
+              <cloud:simple-type>text</cloud:simple-type>
+            </cloud:external-type>
+          </cloud:map>
+          <cloud:map name="List">
+            <cloud:internal-type>
+              <cloud:enumeration-type name="SampleList">
+                <cloud:enumeration>List1</cloud:enumeration>
+                <cloud:enumeration>List2</cloud:enumeration>
+                <cloud:enumeration>List3</cloud:enumeration>
+              </cloud:enumeration-type>
+            </cloud:internal-type>
+            <cloud:external-type>
+              <cloud:simple-type>text</cloud:simple-type>
+            </cloud:external-type>
+          </cloud:map>
+        </cloud:attribute-map-service>
+        <cloud:report-service name="INTAD_Report_Service">
+          <cloud:report-alias description="Sample Custom Report" name="CustomReport">
+            <cloud:report-reference description="AB - Studio Training AD Sample" type="WID">3e32ee94e40001076c99b9563014a136</cloud:report-reference>
+          </cloud:report-alias>
+        </cloud:report-service>
+      </cc:integration-system>
+        </cc:workday-in>
+        <cc:async-mediation id="AsyncMediation" routes-to="CallGetDataRoute">
+            <cc:steps>
+                <cc:eval id="InitProps">
+                    <cc:expression>props['p.error.count'] = 0</cc:expression>
+                    <cc:expression>props['ia.DocRetention'] = intsys.getAttribute('Document Retention') != empty ?  intsys.getAttribute('Document Retention') : '90' ;</cc:expression>
+                    <cc:expression>props['data.source'] = lp.getSimpleData('DataSource')</cc:expression>
+                    <cc:expression>props['company.wid'] =  lp.getReferenceData('Company', 'WID')</cc:expression>
+                </cc:eval>
+            </cc:steps>
+            <cc:send-error id="SendError" routes-to="CallLEH.20"/>
+        </cc:async-mediation>
+        <cc:local-out id="CallGetDataRoute" store-message="none" routes-response-to="CallProcessData" endpoint="vm://INTTEST_GMS_Active_Directory/GetDataRoute"/>
+        <cc:local-out id="CallProcessData" store-message="none" routes-response-to="CallSaveOutput" endpoint="vm://INTTEST_GMS_Active_Directory/ProcessData"/>
+        <cc:send-error id="global-error-handler" rethrow-error="false" routes-to="Note-Error"/>
+        <cc:local-out id="Note-Error" endpoint="vm://wcc/PutIntegrationMessage">
+            <cc:set name="is.message.severity" value="'CRITICAL'"/>
+            <cc:set name="is.message.summary" value="'CRITICAL ERROR - INTEGRATION ABORT'"/>
+        <cc:set name="is.message.detail" value="context.errorMessage"/></cc:local-out>
+        <cc:local-in id="GetCRData" routes-to="SetExtraPath"/>
+        <cc:local-in id="ProcessData" routes-to="TransformCROutput"/>
+        <cc:local-out id="CallSaveOutput" store-message="none" endpoint="vm://INTTEST_GMS_Active_Directory/SaveOutputFile"/>
+        <cc:async-mediation id="TransformCROutput" routes-to="TransformWSOutput" execute-steps-when="props['data.source'] == 'CustomReport'">
+            <cc:steps>
+                <cc:xslt-plus id="XsltPlus" output="variable" output-mimetype="text/plain" output-variable="v.OutputFile" input="variable" input-variable="v.AD.Source.CR" url="ADTransformation.xsl"/>
+            </cc:steps>
+            <cc:send-error id="SendError" routes-to="CallLEH.7"/>
+        </cc:async-mediation>
+        <cc:async-mediation id="SetExtraPath" routes-to="WorkdayOutRest">
+            <cc:steps>
+                <cc:eval id="Eval">
+                    <cc:expression>props['extra.path'] = '?Company!WID=' + props['company.wid']</cc:expression>
+                </cc:eval>
+            </cc:steps>
+            <cc:send-error id="SendError" routes-to="CallLEH.1"/>
+        </cc:async-mediation>
+        <cc:async-mediation id="SaveCROutput">
+            <cc:steps>
+                <cc:copy id="Copy" output="variable" output-variable="v.AD.Source.CR"/>
+            </cc:steps>
+            <cc:send-error id="SendError" routes-to="CallLEH.2"/>
+        </cc:async-mediation>
+        <cc:workday-out-rest id="WorkdayOutRest" routes-response-to="SaveCROutput" extra-path="@{intsys.reportService.getExtrapath('CustomReport') + props['extra.path']}"/>
+        <cc:async-mediation id="RestoreMessage">
+            <cc:steps>
+                <cc:copy id="RestoreMessage" input="variable" input-variable="v.Message"/>
+            </cc:steps>
+        </cc:async-mediation>
+        <cc:async-mediation id="LogMessageError" routes-to="RestoreMessage">
+            <cc:steps>
+                <cc:log id="Log">
+                    <cc:log-message>
+                        <cc:text>CRITICAL ERROR:&#xD;
+Integration Encountered Error upon writing error message to log file. Please review the integration configuration!</cc:text>
+                    </cc:log-message>
+                </cc:log>
+            </cc:steps>
+        </cc:async-mediation>
+        <cc:local-out id="PutErrorMessagetoWD" routes-response-to="RestoreMessage" endpoint="vm://wcc/PutIntegrationMessage">
+            <cc:set name="is.message.summary" value="context.errorMessage"/>
+            <cc:set name="is.message.storage.enabled" value="true"/>
+            <cc:set name="is.message.detail" value="context.errorMessage"/>
+        </cc:local-out>
+        <cc:async-mediation id="WriteToCloudLog" routes-to="PutErrorMessagetoWD">
+            <cc:steps>
+                <cc:cloud-log id="CloudLogError" level="error" message="@{props['p.error.message']}" message-details="@{props['p.error.detail']}" output-file-type="HTML"/>
+            </cc:steps>
+            <cc:send-error id="SendError" routes-to="LogMessageError"/>
+        </cc:async-mediation>
+        <cc:async-mediation id="SetErrorVars" routes-to="WriteToCloudLog">
+            <cc:steps>
+                <cc:eval id="Eval">
+                    <cc:expression>props['p.error.count'] = props['p.error.count'] + 1</cc:expression>
+                </cc:eval>
+                <cc:copy id="Copy" output="variable" output-variable="v.Message"/>
+            </cc:steps>
+        </cc:async-mediation>
+        <cc:local-in id="LocalErrorHandler" routes-to="SetErrorVars">
+            
+            
+            
+            
+            
+            
+            
+            
+        </cc:local-in>
+        <cc:local-out id="CallLEH.1" store-message="none" endpoint="vm://INTTEST_GMS_Active_Directory/LocalErrorHandler"/>
+        <cc:async-mediation id="SaveRawWSResponse" routes-to="Splitter">
+            <cc:steps>
+                <cc:copy id="Copy" output="variable" output-variable="v.AD.Source.WS.XML"/>
+            </cc:steps>
+            <cc:send-error id="SendError" routes-to="CallLEH.4"/>
+        </cc:async-mediation>
+        <cc:local-out id="CallLEH.3" store-message="none" endpoint="vm://INTTEST_GMS_Active_Directory/LocalErrorHandler"/>
+        <cc:async-mediation id="WriteWSRequest" routes-to="WorkdayOutSoap">
+            <cc:steps>
+                <cc:write id="Write">
+                    <cc:message>
+                        <cc:text>&lt;?xml version=&quot;1.0&quot; ?>&#xD;
+&lt;env:Envelope xmlns:env=&quot;http://schemas.xmlsoap.org/soap/envelope/&quot;>&#xD;
+    &lt;env:Body>&#xD;
+        &lt;wd:Get_Workers_Request xmlns:wd=&quot;urn:com.workday/bsvc&quot; wd:version=&quot;v32.2&quot;>&#xD;
+            &lt;wd:Response_Filter>&#xD;
+                &lt;wd:Page>1&lt;/wd:Page>&#xD;
+                &lt;wd:Count>100&lt;/wd:Count>&#xD;
+            &lt;/wd:Response_Filter>&#xD;
+            &lt;wd:Response_Group>&#xD;
+                &lt;wd:Include_Reference>true&lt;/wd:Include_Reference>&#xD;
+                &lt;wd:Include_Personal_Information>true&lt;/wd:Include_Personal_Information>&#xD;
+                &lt;wd:Include_Employment_Information>true&lt;/wd:Include_Employment_Information>&#xD;
+                &lt;wd:Exclude_Organization_Support_Role_Data>true&lt;/wd:Exclude_Organization_Support_Role_Data>&#xD;
+                &lt;wd:Exclude_Location_Hierarchies>true&lt;/wd:Exclude_Location_Hierarchies>&#xD;
+                &lt;wd:Exclude_Cost_Centers>true&lt;/wd:Exclude_Cost_Centers>&#xD;
+                &lt;wd:Exclude_Cost_Center_Hierarchies>true&lt;/wd:Exclude_Cost_Center_Hierarchies>&#xD;
+                &lt;wd:Exclude_Companies>true&lt;/wd:Exclude_Companies>&#xD;
+                &lt;wd:Exclude_Company_Hierarchies>true&lt;/wd:Exclude_Company_Hierarchies>&#xD;
+                &lt;wd:Exclude_Pay_Groups>true&lt;/wd:Exclude_Pay_Groups>&#xD;
+                &lt;wd:Exclude_Custom_Organizations>true&lt;/wd:Exclude_Custom_Organizations>&#xD;
+                &lt;wd:Include_Roles>true&lt;/wd:Include_Roles>&#xD;
+                &lt;wd:Include_Related_Persons>true&lt;/wd:Include_Related_Persons>&#xD;
+                &lt;wd:Include_Qualifications>true&lt;/wd:Include_Qualifications>&#xD;
+                &lt;wd:Include_Skills>true&lt;/wd:Include_Skills>&#xD;
+                &lt;wd:Include_Worker_Documents>true&lt;/wd:Include_Worker_Documents>&#xD;
+                &lt;wd:Include_Transaction_Log_Data>true&lt;/wd:Include_Transaction_Log_Data>&#xD;
+                &lt;wd:Include_Subevents_for_Corrected_Transaction>true&lt;/wd:Include_Subevents_for_Corrected_Transaction>&#xD;
+                &lt;wd:Include_Subevents_for_Rescinded_Transaction>true&lt;/wd:Include_Subevents_for_Rescinded_Transaction>&#xD;
+                &lt;wd:Include_Succession_Profile>true&lt;/wd:Include_Succession_Profile>&#xD;
+                &lt;wd:Include_Talent_Assessment>true&lt;/wd:Include_Talent_Assessment>&#xD;
+                &lt;wd:Include_User_Account>true&lt;/wd:Include_User_Account>&#xD;
+                &lt;wd:Exclude_Fund_Hierarchies>true&lt;/wd:Exclude_Fund_Hierarchies>&#xD;
+                &lt;wd:Exclude_Grants>true&lt;/wd:Exclude_Grants>&#xD;
+                &lt;wd:Exclude_Grant_Hierarchies>true&lt;/wd:Exclude_Grant_Hierarchies>&#xD;
+                &lt;wd:Exclude_Business_Units>true&lt;/wd:Exclude_Business_Units>&#xD;
+                &lt;wd:Exclude_Business_Unit_Hierarchies>true&lt;/wd:Exclude_Business_Unit_Hierarchies>&#xD;
+                &lt;wd:Exclude_Gifts>true&lt;/wd:Exclude_Gifts>&#xD;
+                &lt;wd:Exclude_Gift_Hierarchies>true&lt;/wd:Exclude_Gift_Hierarchies>&#xD;
+            &lt;/wd:Response_Group>&#xD;
+        &lt;/wd:Get_Workers_Request>&#xD;
+    &lt;/env:Body>&#xD;
+&lt;/env:Envelope></cc:text>
+                    </cc:message>
+                </cc:write>
+            </cc:steps>
+            <cc:send-error id="SendError" routes-to="CallLEH.3"/>
+        </cc:async-mediation>
+        <cc:local-in id="GetWSData" routes-to="WriteWSRequest"/>
+        <cc:workday-out-soap id="WorkdayOutSoap" routes-response-to="SaveRawWSResponse" application="Human_Resources" version="v32.2"/>
+        <cc:local-out id="CallLEH.2" store-message="none" endpoint="vm://INTTEST_GMS_Active_Directory/LocalErrorHandler"/>
+        <cc:local-out id="CallLEH.4" store-message="none" endpoint="vm://INTTEST_GMS_Active_Directory/LocalErrorHandler"/>
+        <cc:local-out id="CallLEH.7" store-message="none" endpoint="vm://INTTEST_GMS_Active_Directory/LocalErrorHandler"/>
+        <cc:local-out id="CallLEH.8" store-message="none" endpoint="vm://INTTEST_GMS_Active_Directory/LocalErrorHandler"/>
+        <cc:async-mediation id="TransformWSOutput" execute-steps-when="props['data.source'] == 'WebService'">
+            <cc:steps>
+                <cc:xslt-plus id="XsltPlus" output="variable" output-mimetype="text/plain" output-variable="v.OutputFile" input="variable" input-variable="v.AD.Source.WS" url="ADTransformation.xsl"/>
+            </cc:steps>
+            <cc:send-error id="SendError" routes-to="CallLEH.8"/>
+        </cc:async-mediation>
+        <cc:local-out id="CallLEH.20" store-message="none" endpoint="vm://INTTEST_GMS_Active_Directory/LocalErrorHandler"/>
+        <cc:splitter id="Splitter">
+            <cc:sub-route name="SubRoute" routes-to="SavePropsWriteXML"/>
+            <cc:xml-stream-splitter xpath="env:Envelope/env:Body/wd:Get_Workers_Response/wd:Response_Data/wd:Worker"/>
+        </cc:splitter>
+        <cc:async-mediation id="SavePropsWriteXML" routes-to="Aggregator">
+            <cc:steps>
+                <cc:eval id="Eval">
+                    <cc:expression>props['employee.id'] = parts[0].xpath('wd:Worker/wd:Worker_Reference/wd:ID[@wd:type=&quot;Employee_ID&quot;]')</cc:expression>
+                    <cc:expression>props['first.name'] = parts[0].xpath('wd:Worker/wd:Worker_Data/wd:Personal_Data/wd:Name_Data/wd:Legal_Name_Data/wd:Name_Detail_Data/wd:First_Name')</cc:expression>
+                    <cc:expression>props['last.name'] = parts[0].xpath('wd:Worker/wd:Worker_Data/wd:Personal_Data/wd:Name_Data/wd:Legal_Name_Data/wd:Name_Detail_Data/wd:Last_Name')</cc:expression>
+                    <cc:expression>props['phone.number'] = parts[0].xpath('wd:Worker/wd:Worker_Data/wd:Personal_Data/wd:Contact_Data/wd:Phone_Data[1]/wd:Phone_Number').replace('-','')</cc:expression>
+                    <cc:expression>props['email.address'] = parts[0].xpath('wd:Worker/wd:Worker_Data/wd:Personal_Data/wd:Contact_Data/wd:Email_Address_Data[1]/wd:Email_Address')</cc:expression>
+                </cc:eval>
+                <cc:xslt-plus id="XsltPlus" output-mimetype="text/xml" url="WSTransform.xsl"/>
+            </cc:steps>
+            <cc:send-error id="SendError" routes-to="CallLEH.5"/>
+        </cc:async-mediation>
+        <cc:aggregator id="Aggregator" routes-to="AsyncMediation0">
+            <cc:size-batch-strategy batch-size="-1"/>
+            <cc:message-content-collater output-mimetype="text/xml">
+        <cc:header-text>@{'&lt;wd:Report_Data xmlns:wd=&quot;urn:com.workday/bsvc&quot;>'}</cc:header-text>
+        <cc:footer-text>@{'&lt;/wd:Report_Data>'}</cc:footer-text>
+      </cc:message-content-collater>
+        </cc:aggregator>
+        <cc:local-in id="GetDataRoute" routes-to="Route"/>
+        <cc:route id="Route">
+            <cc:mvel-strategy>
+                <cc:choose-route expression="props['data.source'] == 'CustomReport'" route="CustomReport"/>
+                <cc:choose-route expression="props['data.source'] == 'WebService'" route="WebService"/>
+                <cc:choose-route expression="true" route="Else"/>
+            </cc:mvel-strategy>
+            <cc:sub-route name="CustomReport" routes-to="CallCustomReport"/>
+            <cc:sub-route name="WebService" routes-to="CallWebService"/>
+            <cc:sub-route name="Else" routes-to="AsyncMediation2"/>
+        </cc:route>
+        <cc:local-out id="CallCustomReport" store-message="none" endpoint="vm://INTTEST_GMS_Active_Directory/GetCRData"/>
+        <cc:local-out id="CallWebService" store-message="none" endpoint="vm://INTTEST_GMS_Active_Directory/GetWSData"/>
+        <cc:async-mediation id="AsyncMediation2">
+            <cc:steps>
+                <cc:cloud-log id="CriticalError" level="fatal" message="@{'DANGER WILL ROBINSON - ERROR IN SETTING DATA SOURCE!'}" message-details="@{'DANGER WILL ROBINSON - ERROR IN SETTING DATA SOURCE! CHECK YOUR INTEGRATION LAUNCH PARAMETERS'}" output-file-type="HTML"/>
+            </cc:steps>
+        </cc:async-mediation>
+        <cc:async-mediation id="AsyncMediation0">
+            <cc:steps>
+                <cc:copy id="Copy" output="variable" output-variable="v.AD.Source.WS" input="message"/>
+            </cc:steps>
+            <cc:send-error id="SendError" routes-to="CallLEH.6"/>
+        </cc:async-mediation>
+        <cc:local-out id="CallLEH.5" store-message="none" endpoint="vm://INTTEST_GMS_Active_Directory/LocalErrorHandler"/>
+        <cc:local-out id="CallLEH.6" store-message="none" endpoint="vm://INTTEST_GMS_Active_Directory/LocalErrorHandler"/>
+        <cc:local-in id="SaveOutputFile" routes-to="AsyncMediation1"/>
+        <cc:async-mediation id="AsyncMediation1" routes-to="AsyncMediation10">
+            <cc:steps>
+                <cc:store id="Store" output-mimetype="text/plain" input="variable" input-variable="v.OutputFile" createDocumentReference="true" expiresIn="@{props['ia.DocRetention']}" title="@{'GMS_AD_OutputFile.txt'}"/>
+            </cc:steps>
+            <cc:send-error id="SendError" routes-to="CallLEH.80"/>
+        </cc:async-mediation>
+        <cc:local-out id="CallLEH.80" store-message="none" endpoint="vm://INTTEST_GMS_Active_Directory/LocalErrorHandler"/>
+        <cc:local-out id="CallLEH.800" store-message="none" endpoint="vm://INTTEST_GMS_Active_Directory/LocalErrorHandler"/>
+        <cc:async-mediation id="AsyncMediation10" execute-steps-when="vars['cloud-log-content']">
+            <cc:steps>
+                <cc:store id="Store0" output-mimetype="text/html" input="variable" input-variable="cloud-log-content" createDocumentReference="true" expiresIn="@{props['ia.DocRetention']}" title="@{'INT001_GMS_AD_IntegrationMessages.html'}"/>
+            </cc:steps>
+            <cc:send-error id="SendError" routes-to="CallLEH.800"/>
+        </cc:async-mediation>
+	</cc:assembly>
+
+</beans>
